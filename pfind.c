@@ -6,7 +6,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <string.h>
-#include <string.h>
 
 int main(int arc, char** args){
 
@@ -28,7 +27,7 @@ int main(int arc, char** args){
 	}printf("\n");
 #endif
 	
-	//check # of option 
+	//check # of option + (number of worker) 
 	int numOpt = 0;
 	int numProc = 2;
 	for(int i = 0; i < argsNum; i++){
@@ -62,7 +61,7 @@ int main(int arc, char** args){
 	printf("==> # OF WORKERS : %d\n", numProc);
 #endif
 
-	//save address # for directory and start of keyword
+	//save space # for directory and start of keyword
 	int numDir = numOpt + 1;
 	int numKey = numDir + 1;
 	int countKey = argsNum - numKey;
@@ -85,10 +84,50 @@ int main(int arc, char** args){
 		printf("Terminating Program\n");
 		exit(0);
 	}
+
+	//open the directory to be searched
+	DIR *directory = opendir(args[numDir]);
+	if(directory == NULL){
+		printf("ERROR : cannot open this directory '%s'\n", args[numDir]);
+		printf("Terminating Program\n");
+		exit(0);
+	}
+
+#ifdef DEBUG
+	printf("==> DIRECTORY '%s' IS SUCCESSFULLY OPENED\n", args[numDir]);
+#endif
+
+	//looks into each file of the given directory
+	struct dirent *each_file;
+	while((each_file = readdir(directory)) != NULL){
+		if(strcmp(each_file->d_name, "..") == 0 || strcmp(each_file->d_name, ".") == 0){}
+		else{
+#ifdef DEBUG
+			printf("==> %s > %s\n", args[numDir], each_file->d_name);
+#endif
+		}
+	}
+
+/*	
+	//make named pipe : tasks
+	if (mkfifo("tasks", 0666)) {
+		if (errno != EEXIST) {
+			perror("fail to open fifo: ") ;
+			exit(1) ;
+		}
+	}
 	
+	//make named pipe : results
+	if (mkfifo("results", 0666)) {
+		if (errno != EEXIST) {
+			perror("fail to open fifo: ") ;
+			exit(1) ;
+		}
+	}
+*/
+
 	//make workers in the user given amount
 	pid_t workers[numProc];
-
 	for(int i = 0; i < numProc; i++){
 		workers[i] = fork();
 		if(workers[i] == 0){
