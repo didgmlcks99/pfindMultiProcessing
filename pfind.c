@@ -100,10 +100,30 @@ int main(int arc, char** args){
 	//looks into each file of the given directory
 	struct dirent *each_file;
 	while((each_file = readdir(directory)) != NULL){
+		char path_name[100];
 		if(strcmp(each_file->d_name, "..") == 0 || strcmp(each_file->d_name, ".") == 0){}
 		else{
+			sprintf(path_name, "%s/%s", args[numDir], each_file->d_name);
 #ifdef DEBUG
-			printf("==> %s > %s\n", args[numDir], each_file->d_name);
+			//checks the file type
+			int file_type;
+			pid_t checker = fork();
+			if(checker == 0){
+				file_type = open("fileType.txt", O_WRONLY | O_CREAT, 0644);
+				if(file_type == -1){
+					printf("Error : cannot open file\n");
+					printf("Terminating Program\n");
+					exit(1);
+				}
+
+				dup2(file_type, 1);
+				close(file_type);
+				
+				execlp("file", "file", path_name, NULL);
+			}wait(0x0);
+			
+
+			printf("==> file : %s\n", path_name);
 #endif
 		}
 	}
