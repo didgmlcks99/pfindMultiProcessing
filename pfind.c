@@ -105,7 +105,7 @@ int main(int arc, char** args){
 		else{
 			sprintf(path_name, "%s/%s", args[numDir], each_file->d_name);
 #ifdef DEBUG
-			//checks the file type
+			//executes Linux command : file <file>
 			int file_type;
 			pid_t checker = fork();
 			if(checker == 0){
@@ -116,14 +116,42 @@ int main(int arc, char** args){
 					exit(1);
 				}
 
+				//dup standard output to file, result of Linux command : file
 				dup2(file_type, 1);
 				close(file_type);
 				
 				execlp("file", "file", path_name, NULL);
 			}wait(0x0);
-			
 
-			printf("==> file : %s\n", path_name);
+			//check file type
+			checker = fork();
+			if(checker == 0){
+				file_type = open("fileType.txt", O_RDONLY | O_CREAT, 0644);
+				if(file_type == -1){
+					printf("Error : cannot open file\n");
+					printf("Terminating Program\n");
+					exit(0);
+				}
+
+				//dup standard input to file, scanf result of Linux command : file
+				dup2(file_type, 0);
+				close(file_type);
+				
+				char typeFL[50];
+				scanf("%[^\n]s", typeFL);
+
+				if(strstr(typeFL, "ASCII") != NULL || strstr(typeFL, "text") != NULL){
+					printf("==> FILE TYPE : ASCII or text\n");
+				}else if(strstr(typeFL, "directory") != NULL){
+					printf("==> FILE TYPE : directory\n");	
+				}else{
+					printf("==> FILE TYPE : not regular");
+				}
+
+				exit(1);
+			}wait(0x0);
+
+			printf("==> FILE : %s\n", path_name);
 #endif
 		}
 	}
