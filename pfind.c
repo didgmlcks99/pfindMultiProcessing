@@ -85,6 +85,8 @@ int main(int arc, char** args){
 		exit(0);
 	}
 
+//================================================================================
+
 	//open the directory to be searched
 	DIR *directory = opendir(args[numDir]);
 	if(directory == NULL){
@@ -100,7 +102,7 @@ int main(int arc, char** args){
 	//looks into each file of the given directory
 	struct dirent *each_file;
 	while((each_file = readdir(directory)) != NULL){
-		char path_name[100];
+		char path_name[50];
 		if(strcmp(each_file->d_name, "..") == 0 || strcmp(each_file->d_name, ".") == 0){}
 		else{
 			sprintf(path_name, "%s/%s", args[numDir], each_file->d_name);
