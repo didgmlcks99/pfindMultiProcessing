@@ -6,6 +6,35 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <string.h>
+#include <errno.h>
+
+int write_bytes(int fd, void * a, int len){
+	char * s = (char *) a;
+
+	int i = 0;
+	while(i < len){
+		int b;
+		b = write(fd, s+i, len-i);
+		if(b == 0) break;
+		i += b;
+	}
+	return i;
+}
+
+int read_bytes (int fd, void * a, int len)
+{
+	char * s = (char *) a ;
+	
+	int i ;
+	for (i = 0 ; i < len ; ) {
+		int b ;
+		b = read(fd, s+i, len-i) ;
+		if (b == 0)
+			break ;
+		i += b ;
+	}
+	return i ; 
+}
 
 int main(int arc, char** args){
 
@@ -87,78 +116,6 @@ int main(int arc, char** args){
 
 //================================================================================
 
-	//open the directory to be searched
-	DIR *directory = opendir(args[numDir]);
-	if(directory == NULL){
-		printf("ERROR : cannot open this directory '%s'\n", args[numDir]);
-		printf("Terminating Program\n");
-		exit(0);
-	}
-
-#ifdef DEBUG
-	printf("==> DIRECTORY '%s' IS SUCCESSFULLY OPENED\n", args[numDir]);
-#endif
-
-	//looks into each file of the given directory
-	struct dirent *each_file;
-	while((each_file = readdir(directory)) != NULL){
-		char path_name[50];
-		if(strcmp(each_file->d_name, "..") == 0 || strcmp(each_file->d_name, ".") == 0){}
-		else{
-			sprintf(path_name, "%s/%s", args[numDir], each_file->d_name);
-#ifdef DEBUG
-			//executes Linux command : file <file>
-			int file_type;
-			pid_t checker = fork();
-			if(checker == 0){
-				file_type = open("fileType.txt", O_WRONLY | O_CREAT, 0644);
-				if(file_type == -1){
-					printf("Error : cannot open file\n");
-					printf("Terminating Program\n");
-					exit(1);
-				}
-
-				//dup standard output to file, result of Linux command : file
-				dup2(file_type, 1);
-				close(file_type);
-				
-				execlp("file", "file", path_name, NULL);
-			}wait(0x0);
-
-			//check file type
-			checker = fork();
-			if(checker == 0){
-				file_type = open("fileType.txt", O_RDONLY | O_CREAT, 0644);
-				if(file_type == -1){
-					printf("Error : cannot open file\n");
-					printf("Terminating Program\n");
-					exit(0);
-				}
-
-				//dup standard input to file, scanf result of Linux command : file
-				dup2(file_type, 0);
-				close(file_type);
-				
-				char typeFL[50];
-				scanf("%[^\n]s", typeFL);
-
-				if(strstr(typeFL, "ASCII") != NULL || strstr(typeFL, "text") != NULL){
-					printf("==> FILE TYPE : ASCII or text\n");
-				}else if(strstr(typeFL, "directory") != NULL){
-					printf("==> FILE TYPE : directory\n");	
-				}else{
-					printf("==> FILE TYPE : not regular");
-				}
-
-				exit(1);
-			}wait(0x0);
-
-			printf("==> FILE : %s\n", path_name);
-#endif
-		}
-	}
-
-/*	
 	//make named pipe : tasks
 	if (mkfifo("tasks", 0666)) {
 		if (errno != EEXIST) {
@@ -166,15 +123,6 @@ int main(int arc, char** args){
 			exit(1) ;
 		}
 	}
-	
-	//make named pipe : results
-	if (mkfifo("results", 0666)) {
-		if (errno != EEXIST) {
-			perror("fail to open fifo: ") ;
-			exit(1) ;
-		}
-	}
-*/
 
 	//make workers in the user given amount
 	pid_t workers[numProc];
@@ -184,9 +132,114 @@ int main(int arc, char** args){
 #ifdef DEBUG
 			printf("==> WORKER #%d AT WORK...\n", i);
 #endif
+			int tasks_rec = open("tasks", O_RDONLY | O_SYNC);
+			
+			//wait for task in tasks_rec pipe
+			while(1){
+				char task_name[128];
+				size_t ln, bs;
+
+				flock(tasks_rec, LOCK_EX);
+
+				if(read_bytes(tasks_rec, &ln, sizeof(ln)) != sizeof(ln)){
+					flock(tasks_rec, LOCK_UN);
+					break;
+				}
+
+				bs = read_bytes(tasks_rec, task_name, ln);
+				task_name[bs] = 0x0;
+
+				flock(tasks_rec, LOCK_UN);
+
+#ifdef DEBUG
+				printf("==> CURRENT TASK : %s\n", task_name);
+#endif
+
+				// for(int i = 0; i < bs; i++){
+				// 	putchar(task_name[i]);
+				// }printf("\n");
+
+				//open the directory to be searched
+				DIR *directory = opendir(task_name);
+				if(directory == NULL){
+					printf("ERROR : cannot open this directory '%s'\n", task_name);
+					printf("Terminating Program\n");
+					exit(0);
+				}
+
+#ifdef DEBUG
+				printf("==> DIRECTORY '%s' IS SUCCESSFULLY OPENED\n", task_name);
+#endif
+
+				//looks into each file of the given directory
+				struct dirent *each_file;
+				while((each_file = readdir(directory)) != NULL){
+					char path_name[50];
+					if(strcmp(each_file->d_name, "..") == 0 || strcmp(each_file->d_name, ".") == 0){}
+					else{
+						sprintf(path_name, "%s/%s", task_name, each_file->d_name);
+
+						//open pipe for sending data from linux command, file
+						int pipes[2];
+						if(pipe(pipes) != 0){
+							perror("Error : cannot open pipe\n");
+							printf("Terminating Program\n");
+							exit(1);
+						}
+
+#ifdef DEBUG
+						printf("==> PIPE:FILE : [%d, %d] : %s\n", pipes[0], pipes[1], path_name);
+#endif
+
+						//executes Linux command : file <file>, sending result to pipe
+						pid_t checker = fork();
+						if(checker == 0){
+							close(pipes[0]);
+							dup2(pipes[1], 1);
+							execlp("file", "file", path_name, NULL);
+						}wait(0x0);
+
+						//check file type, from pipe
+						checker = fork();
+						if(checker == 0){
+							close(pipes[1]);
+							dup2(pipes[0], 0);
+
+							char typeFL[50];
+
+							scanf("%[^\n]s", typeFL);
+
+#ifdef DEBUG
+							printf("==> EXEC RESULT : %s\n", typeFL);
+#endif
+
+							if(strstr(typeFL, "ASCII") != NULL || strstr(typeFL, "text") != NULL){
+								printf("FILE TYPE : ASCII or text\n");
+							}else if(strstr(typeFL, "directory") != NULL){
+								printf("FILE TYPE : directory\n");	
+							}else{
+								printf("FILE TYPE : not regular");
+							}
+							exit(1);
+						}wait(0x0);
+					}
+				}
+			}
+			close(tasks_rec);
 			exit(1);
 		}
 	}
+
+	char task[50];
+	strcpy(task, args[numDir]);
+
+	//manager wait for result
+	// while(1){
+		int tasks_send = open("tasks", O_WRONLY | O_SYNC);
+		size_t len = strlen(task);
+		if(write_bytes(tasks_send, &len, sizeof(len)) != sizeof(len)){}
+		if(write_bytes(tasks_send, task, len) != sizeof(len)){}
+	// }
 
 	//manager waiting for all worker to end
 	for(int i = 0; i< numProc; i++){
@@ -196,6 +249,17 @@ int main(int arc, char** args){
 #ifdef DEBUG
 	printf("==> ALL WORKERS DONE CHECKED BY MANAGER PROCESS...\n");
 #endif
+//=============================================================================
+
+/*
+	//make named pipe : results
+	if (mkfifo("results", 0666)) {
+		if (errno != EEXIST) {
+			perror("fail to open fifo: ") ;
+			exit(1) ;
+		}
+	}
+*/
 
 	return 0;
 }

@@ -11,4 +11,4 @@ $(TARGET) : $(OBJECTS)
 $(DTARGET) : $(OBJECTS)
 	$(CC) $(CFLAGS) -DDEBUG -o $@ $^
 clean :
-	rm pfind pfind_debug
+	rm pfind pfind_debug tasks
