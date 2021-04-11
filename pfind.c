@@ -124,6 +124,14 @@ int main(int arc, char** args){
 		}
 	}
 
+	//make named pipe : results
+	if (mkfifo("results", 0666)) {
+		if (errno != EEXIST) {
+			perror("fail to open fifo: ") ;
+			exit(1) ;
+		}
+	}
+
 	//make workers in the user given amount
 	pid_t workers[numProc];
 	for(int i = 0; i < numProc; i++){
@@ -133,26 +141,27 @@ int main(int arc, char** args){
 			printf("==> WORKER #%d AT WORK...\n", i);
 #endif
 			int tasks_rec = open("tasks", O_RDONLY | O_SYNC);
+			int results_send = open("results", O_WRONLY | O_SYNC);
 			
 			//wait for task in tasks_rec pipe
 			while(1){
 				char task_name[128];
-				size_t ln, bs;
+				size_t len, bs;
 
 				flock(tasks_rec, LOCK_EX);
 
-				if(read_bytes(tasks_rec, &ln, sizeof(ln)) != sizeof(ln)){
+				if(read_bytes(tasks_rec, &len, sizeof(len)) != sizeof(len)){
 					flock(tasks_rec, LOCK_UN);
 					break;
 				}
 
-				bs = read_bytes(tasks_rec, task_name, ln);
+				bs = read_bytes(tasks_rec, task_name, len);
 				task_name[bs] = 0x0;
 
 				flock(tasks_rec, LOCK_UN);
 
 #ifdef DEBUG
-				printf("==> CURRENT TASK : %s\n", task_name);
+				printf("==> WORKER #%d RECEIVED TASK : %s...\n", i, task_name);		
 #endif
 
 				// for(int i = 0; i < bs; i++){
@@ -197,11 +206,12 @@ int main(int arc, char** args){
 							close(pipes[0]);
 							dup2(pipes[1], 1);
 							execlp("file", "file", path_name, NULL);
+							exit(1);
 						}wait(0x0);
 
 						//check file type, from pipe
-						checker = fork();
-						if(checker == 0){
+						pid_t maker = fork();
+						if(maker == 0){
 							close(pipes[1]);
 							dup2(pipes[0], 0);
 
@@ -216,7 +226,18 @@ int main(int arc, char** args){
 							if(strstr(typeFL, "ASCII") != NULL || strstr(typeFL, "text") != NULL){
 								printf("FILE TYPE : ASCII or text\n");
 							}else if(strstr(typeFL, "directory") != NULL){
-								printf("FILE TYPE : directory\n");	
+#ifdef DEBUG
+								printf("==> FILE TYPE : directory\n");
+								printf("==> WORKER #%d SENT TASK : %s...\n", i, path_name);
+#endif			
+								size_t len = strlen(path_name);
+								flock(results_send, LOCK_EX);
+								if(write_bytes(results_send, &len, sizeof(len)) != sizeof(len)){}
+								if(write_bytes(results_send, path_name, len) != sizeof(len)){
+									flock(results_send, LOCK_UN);
+									break;
+								}
+								flock(results_send, LOCK_UN);
 							}else{
 								printf("FILE TYPE : not regular");
 							}
@@ -225,41 +246,65 @@ int main(int arc, char** args){
 					}
 				}
 			}
-			close(tasks_rec);
-			exit(1);
+			// close(tasks_rec);
+			// close(results_send);
+			//exit(1);
+			//kill(workers[i], SIGCHLD);
 		}
 	}
 
-	char task[50];
+	char task[128];
 	strcpy(task, args[numDir]);
 
-	//manager wait for result
-	// while(1){
-		int tasks_send = open("tasks", O_WRONLY | O_SYNC);
+	int tasks_send = open("tasks", O_WRONLY | O_SYNC);
+	int results_rec = open("results", O_RDONLY | O_SYNC);
+	while(1){
+#ifdef DEBUG
+		printf("==> MANAGER SENDING TASK : %s\n", task);
+#endif
+		//manager send task through tasks_send pipe
 		size_t len = strlen(task);
+
 		if(write_bytes(tasks_send, &len, sizeof(len)) != sizeof(len)){}
 		if(write_bytes(tasks_send, task, len) != sizeof(len)){}
-	// }
+			
+		//wait for worker in results_rec pipe
+		char result_name[128];
+		size_t length, bs;
+
+		// flock(results_rec, LOCK_EX);
+
+		if(read_bytes(results_rec, &length, sizeof(length)) != sizeof(length)){
+			// flock(results_rec, LOCK_UN);
+			// break;
+		}
+
+		bs = read_bytes(results_rec, result_name, length);
+		result_name[bs] = 0x0;
+
+		// flock(results_rec, LOCK_UN);
+
+#ifdef DEBUG
+		printf("==> MANAGER RECEIVED TASK : %s\n", result_name);
+#endif
+
+		strcpy(task, result_name);
+
+		// for(int i = 0; i < bs; i++){
+		// 	putchar(result_name[i]);
+		// }printf("\n");
+	}
+	close(tasks_send);
+	close(results_rec);
 
 	//manager waiting for all worker to end
-	for(int i = 0; i< numProc; i++){
-		wait(0x0);
-	}
+	// for(int i = 0; i< numProc; i++){
+	// 	wait(0x0);
+	// }
 
 #ifdef DEBUG
 	printf("==> ALL WORKERS DONE CHECKED BY MANAGER PROCESS...\n");
 #endif
-//=============================================================================
-
-/*
-	//make named pipe : results
-	if (mkfifo("results", 0666)) {
-		if (errno != EEXIST) {
-			perror("fail to open fifo: ") ;
-			exit(1) ;
-		}
-	}
-*/
 
 	return 0;
 }
