@@ -150,7 +150,6 @@ int main(int arc, char** args){
 				flock(tasks_rec, LOCK_EX);
 
 				if(read_bytes(tasks_rec, &len, sizeof(len)) != sizeof(len)){
-					// printf("here break in task read in worker #%d\n", i);
 					flock(tasks_rec, LOCK_UN);
 					continue;
 				}
@@ -163,10 +162,6 @@ int main(int arc, char** args){
 #ifdef DEBUG
 				printf("==> WORKER[%d] > RECEIVED TASK : %s...\n", i, task_name);		
 #endif
-
-				// for(int i = 0; i < bs; i++){
-				// 	putchar(task_name[i]);
-				// }printf("\n");
 
 				//open the directory to be searched
 				DIR *directory = opendir(task_name);
@@ -235,6 +230,7 @@ int main(int arc, char** args){
 									continue;
 								}
 
+								//check text file by each line
 								char line[256];
 								int line_num = 0;
 								while(fgets(line, 256, text_file)){
@@ -242,7 +238,7 @@ int main(int arc, char** args){
 									int ctr = 0;
 									int j = 0;
 									for(int i = 0; i <= strlen(line); i++){
-										if(line[i] == ' ' || line[i] == '\0'){
+										if(line[i] == ' ' || line[i] == '\n'){
 											each_word[ctr][j] = '\0';
 											ctr++;
 											j = 0;
@@ -266,6 +262,8 @@ int main(int arc, char** args){
 											break;
 										}
 									}
+
+									//print out result
 									if(correct == 1){
 										printf("%s : %d : %s", path_name, line_num, line);
 									}
@@ -280,7 +278,6 @@ int main(int arc, char** args){
 								flock(results_send, LOCK_EX);
 								if(write_bytes(results_send, &len, sizeof(len)) != sizeof(len)){}
 								if(write_bytes(results_send, path_name, len) != len){
-									printf("here break in result send\n");
 									flock(results_send, LOCK_UN);
 									break;
 								}
@@ -293,15 +290,21 @@ int main(int arc, char** args){
 					}
 				}
 			}
-			// close(tasks_rec);
-			// close(results_send);
+			close(tasks_rec);
+			close(results_send);
 			exit(1);
-			//kill(workers[i], SIGCHLD);
 		}
 	}
 
 	char task[128];
 	strcpy(task, args[numDir]);
+
+	char result_name[128];
+	strcpy(result_name, args[numDir]);
+
+	int foundLine = 0;
+	int expFil = 0;
+	int expDir = 1;
 
 	int tasks_send = open("tasks", O_WRONLY | O_SYNC);
 	int results_rec = open("results", O_RDONLY | O_SYNC);
@@ -313,19 +316,12 @@ int main(int arc, char** args){
 		size_t len = strlen(task);
 
 		if(write_bytes(tasks_send, &len, sizeof(len)) != sizeof(len)){}
-		if(write_bytes(tasks_send, task, len) != len){
-			printf("here break in task send\n");
-			// break;
-		}
+		if(write_bytes(tasks_send, task, len) != len){}
 			
 		//wait for worker in results_rec pipe
-		char result_name[128];
 		size_t length, bs;
 
-		if(read_bytes(results_rec, &length, sizeof(length)) != sizeof(length)){
-			printf("here break in result read\n");
-			// break;
-		}
+		if(read_bytes(results_rec, &length, sizeof(length)) != sizeof(length)){}
 
 		bs = read_bytes(results_rec, result_name, length);
 		result_name[bs] = 0x0;
@@ -333,20 +329,15 @@ int main(int arc, char** args){
 #ifdef DEBUG
 		printf("==> MANAGER RECEIVED TASK : %s\n", result_name);
 #endif
-
 		strcpy(task, result_name);
-
-		// for(int i = 0; i < bs; i++){
-		// 	putchar(result_name[i]);
-		// }printf("\n");
 	}
 	close(tasks_send);
 	close(results_rec);
 
 	//manager waiting for all worker to end
-	for(int i = 0; i< numProc; i++){
-		wait(0x0);
-	}
+	// for(int i = 0; i< numProc; i++){
+	// 	wait(0x0);
+	// }
 #ifdef DEBUG
 	printf("==> ALL WORKERS DONE CHECKED BY MANAGER PROCESS...\n");
 #endif
