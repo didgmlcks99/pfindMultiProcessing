@@ -21,8 +21,7 @@ int write_bytes(int fd, void * a, int len){
 	return i;
 }
 
-int read_bytes (int fd, void * a, int len)
-{
+int read_bytes (int fd, void * a, int len){
 	char * s = (char *) a ;
 	
 	int i ;
@@ -76,7 +75,7 @@ int main(int arc, char** args){
 				printf("Error : not by rule\n");
 				printf("!In this limit : 1 <= N <= 8\n");
 				printf("Terminating Program\n");
-				exit(0);
+				exit(1);
 			}
 		}
 	} 
@@ -151,6 +150,7 @@ int main(int arc, char** args){
 				flock(tasks_rec, LOCK_EX);
 
 				if(read_bytes(tasks_rec, &len, sizeof(len)) != sizeof(len)){
+					printf("here break in task read\n");
 					flock(tasks_rec, LOCK_UN);
 					break;
 				}
@@ -180,15 +180,7 @@ int main(int arc, char** args){
 				printf("==> DIRECTORY '%s' IS SUCCESSFULLY OPENED\n", task_name);
 #endif
 
-				//looks into each file of the given directory
-				struct dirent *each_file;
-				while((each_file = readdir(directory)) != NULL){
-					char path_name[50];
-					if(strcmp(each_file->d_name, "..") == 0 || strcmp(each_file->d_name, ".") == 0){}
-					else{
-						sprintf(path_name, "%s/%s", task_name, each_file->d_name);
-
-						//open pipe for sending data from linux command, file
+//open pipe for sending data from linux command, file
 						int pipes[2];
 						if(pipe(pipes) != 0){
 							perror("Error : cannot open pipe\n");
@@ -196,9 +188,31 @@ int main(int arc, char** args){
 							exit(1);
 						}
 
-#ifdef DEBUG
-						printf("==> PIPE:FILE : [%d, %d] : %s\n", pipes[0], pipes[1], path_name);
-#endif
+// #ifdef DEBUG
+						printf("==> PIPE:FILE : [%d, %d]\n", pipes[0], pipes[1]);
+// #endif
+
+				//looks into each file of the given directory
+				struct dirent *each_file;
+				while((each_file = readdir(directory)) != NULL){
+					char path_name[50];
+					if(strcmp(each_file->d_name, "..") == 0 || strcmp(each_file->d_name, ".") == 0){}
+					else{
+						printf("%s\n", each_file->d_name);
+
+						sprintf(path_name, "%s/%s", task_name, each_file->d_name);
+
+// 						//open pipe for sending data from linux command, file
+// 						int pipes[2];
+// 						if(pipe(pipes) != 0){
+// 							perror("Error : cannot open pipe\n");
+// 							printf("Terminating Program\n");
+// 							exit(1);
+// 						}
+
+// #ifdef DEBUG
+// 						printf("==> PIPE:FILE : [%d, %d] : %s\n", pipes[0], pipes[1], path_name);
+// #endif
 
 						//executes Linux command : file <file>, sending result to pipe
 						pid_t checker = fork();
@@ -229,17 +243,18 @@ int main(int arc, char** args){
 #ifdef DEBUG
 								printf("==> FILE TYPE : directory\n");
 								printf("==> WORKER #%d SENT TASK : %s...\n", i, path_name);
-#endif			
+#endif			/*
 								size_t len = strlen(path_name);
 								flock(results_send, LOCK_EX);
 								if(write_bytes(results_send, &len, sizeof(len)) != sizeof(len)){}
-								if(write_bytes(results_send, path_name, len) != sizeof(len)){
+								if(write_bytes(results_send, path_name, len) != len){
+									printf("here break in result send\n");
 									flock(results_send, LOCK_UN);
 									break;
 								}
 								flock(results_send, LOCK_UN);
-							}else{
-								printf("FILE TYPE : not regular");
+							*/}else{
+								printf("FILE TYPE : not regular\n");
 							}
 							exit(1);
 						}wait(0x0);
@@ -248,7 +263,7 @@ int main(int arc, char** args){
 			}
 			// close(tasks_rec);
 			// close(results_send);
-			//exit(1);
+			exit(1);
 			//kill(workers[i], SIGCHLD);
 		}
 	}
@@ -266,7 +281,10 @@ int main(int arc, char** args){
 		size_t len = strlen(task);
 
 		if(write_bytes(tasks_send, &len, sizeof(len)) != sizeof(len)){}
-		if(write_bytes(tasks_send, task, len) != sizeof(len)){}
+		if(write_bytes(tasks_send, task, len) != len){
+			printf("here break in task send\n");
+			break;
+		}
 			
 		//wait for worker in results_rec pipe
 		char result_name[128];
@@ -275,6 +293,7 @@ int main(int arc, char** args){
 		// flock(results_rec, LOCK_EX);
 
 		if(read_bytes(results_rec, &length, sizeof(length)) != sizeof(length)){
+			printf("here break in result read\n");
 			// flock(results_rec, LOCK_UN);
 			// break;
 		}
