@@ -137,7 +137,7 @@ int main(int arc, char** args){
 		workers[i] = fork();
 		if(workers[i] == 0){
 #ifdef DEBUG
-			printf("==> WORKER #%d AT WORK...\n", i);
+			printf("==> WORKER[%d] > AT WORK...\n", i);
 #endif
 			int tasks_rec = open("tasks", O_RDONLY | O_SYNC);
 			int results_send = open("results", O_WRONLY | O_SYNC);
@@ -150,9 +150,9 @@ int main(int arc, char** args){
 				flock(tasks_rec, LOCK_EX);
 
 				if(read_bytes(tasks_rec, &len, sizeof(len)) != sizeof(len)){
-					printf("here break in task read\n");
+					// printf("here break in task read in worker #%d\n", i);
 					flock(tasks_rec, LOCK_UN);
-					break;
+					continue;
 				}
 
 				bs = read_bytes(tasks_rec, task_name, len);
@@ -161,7 +161,7 @@ int main(int arc, char** args){
 				flock(tasks_rec, LOCK_UN);
 
 #ifdef DEBUG
-				printf("==> WORKER #%d RECEIVED TASK : %s...\n", i, task_name);		
+				printf("==> WORKER[%d] > RECEIVED TASK : %s...\n", i, task_name);		
 #endif
 
 				// for(int i = 0; i < bs; i++){
@@ -172,12 +172,11 @@ int main(int arc, char** args){
 				DIR *directory = opendir(task_name);
 				if(directory == NULL){
 					printf("ERROR : cannot open this directory '%s'\n", task_name);
-					printf("Terminating Program\n");
-					exit(0);
+					exit(1);
 				}
 
 #ifdef DEBUG
-				printf("==> DIRECTORY '%s' IS SUCCESSFULLY OPENED\n", task_name);
+				printf("==> WORKER[%d] > DIRECTORY '%s' IS SUCCESSFULLY OPENED\n", i, task_name);
 #endif
 
 //open pipe for sending data from linux command, file
@@ -188,9 +187,9 @@ int main(int arc, char** args){
 							exit(1);
 						}
 
-// #ifdef DEBUG
-						printf("==> PIPE:FILE : [%d, %d]\n", pipes[0], pipes[1]);
-// #endif
+#ifdef DEBUG
+						printf("==> WORKER[%d] > PIPE : [%d, %d]\n", i, pipes[0], pipes[1]);
+#endif
 
 				//looks into each file of the given directory
 				struct dirent *each_file;
@@ -198,21 +197,9 @@ int main(int arc, char** args){
 					char path_name[50];
 					if(strcmp(each_file->d_name, "..") == 0 || strcmp(each_file->d_name, ".") == 0){}
 					else{
-						printf("%s\n", each_file->d_name);
+						// printf("%s\n", each_file->d_name);
 
 						sprintf(path_name, "%s/%s", task_name, each_file->d_name);
-
-// 						//open pipe for sending data from linux command, file
-// 						int pipes[2];
-// 						if(pipe(pipes) != 0){
-// 							perror("Error : cannot open pipe\n");
-// 							printf("Terminating Program\n");
-// 							exit(1);
-// 						}
-
-// #ifdef DEBUG
-// 						printf("==> PIPE:FILE : [%d, %d] : %s\n", pipes[0], pipes[1], path_name);
-// #endif
 
 						//executes Linux command : file <file>, sending result to pipe
 						pid_t checker = fork();
@@ -234,16 +221,61 @@ int main(int arc, char** args){
 							scanf("%[^\n]s", typeFL);
 
 #ifdef DEBUG
-							printf("==> EXEC RESULT : %s\n", typeFL);
+							printf("==> WORKER[%d] > EXEC RESULT : %s\n", i, typeFL);
 #endif
 
 							if(strstr(typeFL, "ASCII") != NULL || strstr(typeFL, "text") != NULL){
-								printf("FILE TYPE : ASCII or text\n");
-							}else if(strstr(typeFL, "directory") != NULL){
 #ifdef DEBUG
-								printf("==> FILE TYPE : directory\n");
-								printf("==> WORKER #%d SENT TASK : %s...\n", i, path_name);
-#endif			/*
+								printf("WORKER[%d] > FILE TYPE : ASCII or text\n", i);
+#endif
+								//open detected text file to read
+								FILE *text_file = fopen(path_name, "r");
+								if(!text_file){
+									printf("Error : cannot open this file '%s'\n", path_name);
+									continue;
+								}
+
+								char line[256];
+								int line_num = 0;
+								while(fgets(line, 256, text_file)){
+									char each_word[50][20];
+									int ctr = 0;
+									int j = 0;
+									for(int i = 0; i <= strlen(line); i++){
+										if(line[i] == ' ' || line[i] == '\0'){
+											each_word[ctr][j] = '\0';
+											ctr++;
+											j = 0;
+										}else{
+											each_word[ctr][j] = line[i];
+											j++;
+										}
+									}
+									
+									// check correct words
+									int correct;
+									for(int i = numKey; i < numKey + countKey; i++){
+										correct = 0;
+										for(int j = 0; j < ctr; j++){
+											if(strcmp(each_word[j], args[i]) == 0){
+												correct = 1;
+												break;
+											}
+										}
+										if(correct == 0){
+											break;
+										}
+									}
+									if(correct == 1){
+										printf("%s : %d : %s", path_name, line_num, line);
+									}
+									line_num++;
+								}
+							}else if(strstr(typeFL, "directory") != NULL){ /*worker found a directory send to manager as a new taks*/
+#ifdef DEBUG
+								printf("==> WORKER[%d] > FILE TYPE : directory\n", i);
+								printf("==> WORKER[%d] > SENT TASK : %s...\n", i, path_name);
+#endif
 								size_t len = strlen(path_name);
 								flock(results_send, LOCK_EX);
 								if(write_bytes(results_send, &len, sizeof(len)) != sizeof(len)){}
@@ -253,7 +285,7 @@ int main(int arc, char** args){
 									break;
 								}
 								flock(results_send, LOCK_UN);
-							*/}else{
+							}else{
 								printf("FILE TYPE : not regular\n");
 							}
 							exit(1);
@@ -283,25 +315,20 @@ int main(int arc, char** args){
 		if(write_bytes(tasks_send, &len, sizeof(len)) != sizeof(len)){}
 		if(write_bytes(tasks_send, task, len) != len){
 			printf("here break in task send\n");
-			break;
+			// break;
 		}
 			
 		//wait for worker in results_rec pipe
 		char result_name[128];
 		size_t length, bs;
 
-		// flock(results_rec, LOCK_EX);
-
 		if(read_bytes(results_rec, &length, sizeof(length)) != sizeof(length)){
 			printf("here break in result read\n");
-			// flock(results_rec, LOCK_UN);
 			// break;
 		}
 
 		bs = read_bytes(results_rec, result_name, length);
 		result_name[bs] = 0x0;
-
-		// flock(results_rec, LOCK_UN);
 
 #ifdef DEBUG
 		printf("==> MANAGER RECEIVED TASK : %s\n", result_name);
@@ -317,10 +344,9 @@ int main(int arc, char** args){
 	close(results_rec);
 
 	//manager waiting for all worker to end
-	// for(int i = 0; i< numProc; i++){
-	// 	wait(0x0);
-	// }
-
+	for(int i = 0; i< numProc; i++){
+		wait(0x0);
+	}
 #ifdef DEBUG
 	printf("==> ALL WORKERS DONE CHECKED BY MANAGER PROCESS...\n");
 #endif
