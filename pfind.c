@@ -69,9 +69,9 @@ void term_prog(){
 	printf("Explored Directories : %d\n", expDir);
 
 	printf("Time (Nano) : %ld\n", time);
-    printf("Time (Micro) : %lf\n", (double)time/1000);
-    printf("Time (Milli) : %lf\n", (double)time/1000000);
-    printf("Time (Second) : %lf\n", (double)time/1000000000);
+	printf("Time (Micro) : %lf\n", (double)time/1000);
+	printf("Time (Milli) : %lf\n", (double)time/1000000);
+	printf("Time (Second) : %lf\n", (double)time/1000000000);
 
 	printf("Good bye.\n");
 
@@ -268,6 +268,8 @@ int main(int arc, char** args){
 							printf("==> WORKER[%d] > EXEC RESULT : %s\n", i, typeFL);
 #endif
 
+							//flag to identify what result to send for summary
+							int flag = 0;
 							if(strstr(typeFL, "ASCII") != NULL || strstr(typeFL, "text") != NULL){
 								/*worker found a ACSII or text version file, 
 								open file explore through each line, find for matching keyword,
@@ -318,9 +320,20 @@ int main(int arc, char** args){
 									////if and only if, all the keywords are found than the line will be printed
 									if(correct == 1){
 										printf("%s : %d : %s", path_name, line_num, line);
+
+										size_t cor_len = strlen("foundLine");
+										flock(results_send, LOCK_EX);
+										//send the line_cor name for each 'foundLine' to the named pipe, results
+										if(write_bytes(results_send, &cor_len, sizeof(cor_len)) != sizeof(cor_len)){}
+										if(write_bytes(results_send, "foundLine", cor_len) != cor_len){
+											flock(results_send, LOCK_UN);
+											break;
+										}
+										flock(results_send, LOCK_UN);
 									}
 									line_num++;
 								}
+								flag = 1;
 							}else if(strstr(typeFL, "directory") != NULL){
 								/*worker found a directory,
 								send to manager as a new taskv through named pipe, results, 
@@ -338,9 +351,32 @@ int main(int arc, char** args){
 									break;
 								}
 								flock(results_send, LOCK_UN);
+
+								flag = 2;
 							}else{
 								printf("FILE TYPE : not regular\n");
+								flag = 0;
 							}
+
+							if(flag != 0){
+								char result_info[20];
+
+								if(flag == 1) strcpy(result_info, "expFil");
+								if(flag == 2) strcpy(result_info, "expDir");
+
+								size_t result_len = strlen(result_info);
+								flock(results_send, LOCK_EX);
+								//send the result_info name for each 'expFil', 'expDir' to the named pipe, results
+								if(write_bytes(results_send, &result_len, sizeof(result_len)) != sizeof(result_len)){}
+								if(write_bytes(results_send, result_info, result_len) != result_len){
+									flock(results_send, LOCK_UN);
+									break;
+								}
+								flock(results_send, LOCK_UN);
+
+								flag = 0;
+							}
+
 							exit(1);
 						}wait(0x0);
 					}
@@ -357,7 +393,6 @@ int main(int arc, char** args){
 	strcpy(task, args[numDir]);
 
 	char result_name[128];
-	strcpy(result_name, args[numDir]);
 
 	int tasks_send = open("tasks", O_WRONLY | O_SYNC);
 	int results_rec = open("results", O_RDONLY | O_SYNC);
@@ -379,29 +414,36 @@ int main(int arc, char** args){
 		if(write_bytes(tasks_send, &len, sizeof(len)) != sizeof(len)){}
 		if(write_bytes(tasks_send, task, len) != len){}
 			
-		size_t length, bs;
-		//get the sent results from a worker through named pipe, results
-		if(read_bytes(results_rec, &length, sizeof(length)) != sizeof(length)){}
+		while(1){
+			size_t length, bs;
+			//get the sent results from a worker through named pipe, results
+			if(read_bytes(results_rec, &length, sizeof(length)) != sizeof(length)){}
 
-		bs = read_bytes(results_rec, result_name, length);
-		result_name[bs] = 0x0;
+			bs = read_bytes(results_rec, result_name, length);
+			result_name[bs] = 0x0;
 
 #ifdef DEBUG
-		printf("==> MANAGER RECEIVED TASK : %s\n", result_name);
+			printf("==> MANAGER RECEIVED TASK : %s\n", result_name);
 #endif
-		//copy the result to task for manager to send to workers
-		strcpy(task, result_name);
+
+			if(strcmp(result_name, "expDir") == 0){
+				expDir++;
+				continue;
+			}else if(strcmp(result_name, "expFil") == 0){
+				expFil++;
+				continue;
+			}else if(strcmp(result_name, "foundLine") == 0){
+				foundLine++;
+				continue;
+			}else{
+				//copy the result to task for manager to send to workers
+				strcpy(task, result_name);
+				break;
+			}
+		}
 	}
 	close(tasks_send);
 	close(results_rec);
-
-	//manager waiting for all worker to end
-	// for(int i = 0; i< numProc; i++){
-	// 	wait(0x0);
-	// }
-#ifdef DEBUG
-	printf("==> ALL WORKERS DONE CHECKED BY MANAGER PROCESS...\n");
-#endif
 
 	return 0;
 }
