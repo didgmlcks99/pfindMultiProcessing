@@ -57,10 +57,7 @@ void term_prog(){
 
 	//killing all worker process
 	for(int i = 0; i < numProc; i++){
-		kill(workers[i], SIGCHLD);
-#ifdef DEBUG
-		printf("killed worker[%d]\n", i);
-#endif	
+		kill(workers[i], SIGCHLD);	
 	}
 
 	printf("======== SUMMARY TOTAL RESULTS ========\n");
@@ -102,28 +99,44 @@ int main(int arc, char** args){
 		printf("%s ", args[i]);
 	}printf("\n");
 #endif
-	
-	//check # of option + (number of worker) 
+
+	//check # of option
 	int numOpt = 0;
+	int type_path = 0;
+	int type_case = 0;
 	// int numProc = 2;
 	for(int i = 0; i < argsNum; i++){
 		if(args[i][0] == '-'){
+			//handles error if user enters options not existing
 			if(args[i][1] != 'p' && args[i][1] != 'c' && args[i][1] != 'a'){
 				printf("Error : no such option as %s\n", args[i]);
 				printf("!Existing options : -p <N>, -c, -a\n");
 				printf("Terminating Program\n");
 				exit(1);
 			}else{ numOpt++; }
-		}
-		if(args[i][1] == 'p'){
-			numProc = args[i+1][0] - '0';
-			if(numProc <= 8 && numProc >= 1){
-				numOpt++;
-			}else{
-				printf("Error : not by rule\n");
-				printf("!In this limit : 1 <= N <= 8\n");
-				printf("Terminating Program\n");
-				exit(1);
+
+			//find user input for option of number of worker 
+			if(args[i][1] == 'p'){
+				numProc = args[i+1][0] - '0';
+
+				if(numProc <= 8 && numProc >= 1){
+					numOpt++;
+				}else{
+					printf("Error : not by rule\n");
+					printf("!In this limit : 1 <= N <= 8\n");
+					printf("Terminating Program\n");
+					exit(1);
+				}
+			}
+
+			//find user input for option -a regarding to type of path
+			if(args[i][1] == 'a'){
+				type_path = 1;
+			}
+
+			//find user input for option -c regarding to type of case
+			if(args[i][1] == 'c'){
+				type_case = 1;
 			}
 		}
 	} 
@@ -135,6 +148,8 @@ int main(int arc, char** args){
 		printf("%s ", args[i]);
 	}printf("\n");
 	printf("==> # OF WORKERS : %d\n", numProc);
+	printf("==> PATH TYPE : %d", type_path);
+	printf("==> CASE TYPE : %d", type_case);
 #endif
 
 	//save space # for directory and start of keyword
@@ -191,7 +206,6 @@ int main(int arc, char** args){
 			int tasks_rec = open("tasks", O_RDONLY | O_SYNC);
 			int results_send = open("results", O_WRONLY | O_SYNC);
 			
-			
 			while(1){
 				//look into named pipe 'tasks' for a task, (directory name)
 				char task_name[128];
@@ -224,26 +238,35 @@ int main(int arc, char** args){
 				printf("==> WORKER[%d] > DIRECTORY '%s' IS SUCCESSFULLY OPENED\n", i, task_name);
 #endif
 
-						//open unnamed pipe for sending data from linux command, file
-						int pipes[2];
-						if(pipe(pipes) != 0){
-							perror("Error : cannot open pipe\n");
-							printf("Terminating Program\n");
-							exit(1);
-						}
+				//open unnamed pipe for sending data from linux command, file
+				int pipes[2];
+				if(pipe(pipes) != 0){
+					perror("Error : cannot open pipe\n");
+					printf("Terminating Program\n");
+					exit(1);
+				}
 
 #ifdef DEBUG
-						printf("==> WORKER[%d] > PIPE : [%d, %d]\n", i, pipes[0], pipes[1]);
+				printf("==> WORKER[%d] > PIPE : [%d, %d]\n", i, pipes[0], pipes[1]);
 #endif
 
 				//looks into each file of the given directory
 				struct dirent *each_file;
+				int return_stat;
+				struct stat file_info;
+				mode_t file_mode;
 				while((each_file = readdir(directory)) != NULL){
 					char path_name[50];
 					if(strcmp(each_file->d_name, "..") == 0 || strcmp(each_file->d_name, ".") == 0){}
 					else{
 						sprintf(path_name, "%s/%s", task_name, each_file->d_name);
-
+						
+						if((return_stat = stat(path_name, &file_info)) == -1){
+							perror("Error : \n");
+							exit(1);
+						}
+						file_mode = file_info.st_mode;
+						
 						//executes Linux command : file <file>, sending result to pipe
 						pid_t checker = fork();
 						if(checker == 0){
@@ -255,7 +278,7 @@ int main(int arc, char** args){
 
 						//differentiates the type of opened files in given task (directory)
 						pid_t maker = fork();
-						if(maker == 0){
+						if(maker == 0){					
 							close(pipes[1]);
 							dup2(pipes[0], 0);
 
@@ -284,21 +307,34 @@ int main(int arc, char** args){
 									continue;
 								}
 
-								//examine each line and crop it by each word
+								//examine each line
 								char line[256];
 								int line_num = 0;
 								while(fgets(line, 256, text_file)){
-									char each_word[50][20];
+									char each_word[100][20];
 									int ctr = 0;
 									int j = 0;
+									//crop it by each word
 									for(int i = 0; i <= strlen(line); i++){
 										if(line[i] == ' ' || line[i] == '\n'){
 											each_word[ctr][j] = '\0';
 											ctr++;
 											j = 0;
 										}else{
-											each_word[ctr][j] = line[i];
+											if(type_case == 1){
+												each_word[ctr][j] = tolower(line[i]);
+											}else{
+												each_word[ctr][j] = line[i];
+											}
 											j++;
+										}
+									}
+
+									if(type_case == 1){
+										for(int i = numKey; i < numKey + countKey; i++){
+											for(int j = 0; j <= strlen(args[numKey]); j++){
+												args[i][j] = tolower(args[i][j]);
+											}
 										}
 									}
 									
@@ -317,9 +353,14 @@ int main(int arc, char** args){
 										}
 									}
 
-									////if and only if, all the keywords are found than the line will be printed
+									//if and only if, all the keywords are found than the line will be printed
 									if(correct == 1){
-										printf("%s : %d : %s", path_name, line_num, line);
+										//print result regarding to type of path
+										if(type_path == 1){
+											printf("%s : %d : %s", realpath(path_name, NULL), line_num, line);
+										}else{
+											printf("%s : %d : %s", path_name, line_num, line);
+										}
 
 										size_t cor_len = strlen("foundLine");
 										flock(results_send, LOCK_EX);
@@ -334,7 +375,7 @@ int main(int arc, char** args){
 									line_num++;
 								}
 								flag = 1;
-							}else if(strstr(typeFL, "directory") != NULL){
+							}else if(S_ISDIR(file_mode) && strstr(typeFL, "directory") != NULL){
 								/*worker found a directory,
 								send to manager as a new taskv through named pipe, results, 
 								then send result regarding to 3. explored directory*/
@@ -354,7 +395,9 @@ int main(int arc, char** args){
 
 								flag = 2;
 							}else{
+#ifdef DEBUG
 								printf("FILE TYPE : not regular\n");
+#endif
 								flag = 0;
 							}
 
