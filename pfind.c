@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <errno.h>
@@ -9,6 +10,18 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/file.h>
+
+//worker process will be initiate after getting user's options
+pid_t *workers;
+
+//number of worker process
+int numProc = 2;
+
+//final result datas of explored information
+struct timespec begin, end;
+int foundLine = 0;
+int expFil = 0;
+int expDir = 1;
 
 int write_bytes(int fd, void * a, int len){
 	char * s = (char *) a;
@@ -37,9 +50,42 @@ int read_bytes (int fd, void * a, int len){
 	return i ; 
 }
 
-int main(int arc, char** args){
+void term_prog(){
+	//getting time result
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	long time = (end.tv_sec - begin.tv_sec) + (end.tv_nsec - begin.tv_nsec);
 
+	//killing all worker process
+	for(int i = 0; i < numProc; i++){
+		kill(workers[i], SIGCHLD);
 #ifdef DEBUG
+		printf("killed worker[%d]\n", i);
+#endif	
+	}
+
+	printf("======== SUMMARY TOTAL RESULTS ========\n");
+	printf("Found Line : %d\n", foundLine);
+	printf("Explored Files : %d\n", expFil);
+	printf("Explored Directories : %d\n", expDir);
+
+	printf("Time (Nano) : %ld\n", time);
+    printf("Time (Micro) : %lf\n", (double)time/1000);
+    printf("Time (Milli) : %lf\n", (double)time/1000000);
+    printf("Time (Second) : %lf\n", (double)time/1000000000);
+
+	printf("Good bye.\n");
+
+	exit(1);
+}
+
+
+int main(int arc, char** args){
+	//start time to check
+	// struct timespec begin, end;
+	clock_gettime(CLOCK_MONOTONIC, &begin);
+	
+#ifdef DEBUG
+	
 	printf("==> THIS IS DEBUG MODE <==\n");
 #endif
 
@@ -59,7 +105,7 @@ int main(int arc, char** args){
 	
 	//check # of option + (number of worker) 
 	int numOpt = 0;
-	int numProc = 2;
+	// int numProc = 2;
 	for(int i = 0; i < argsNum; i++){
 		if(args[i][0] == '-'){
 			if(args[i][1] != 'p' && args[i][1] != 'c' && args[i][1] != 'a'){
@@ -134,7 +180,8 @@ int main(int arc, char** args){
 	}
 
 	//make workers in the user given amount
-	pid_t workers[numProc];
+	// pid_t workers[numProc];
+	workers = (pid_t*)malloc(numProc*sizeof(pid_t));
 	for(int i = 0; i < numProc; i++){
 		workers[i] = fork();
 		if(workers[i] == 0){
@@ -312,13 +359,16 @@ int main(int arc, char** args){
 	char result_name[128];
 	strcpy(result_name, args[numDir]);
 
-	//final result datas of explored information
-	int foundLine = 0;
-	int expFil = 0;
-	int expDir = 1;
-
 	int tasks_send = open("tasks", O_WRONLY | O_SYNC);
 	int results_rec = open("results", O_RDONLY | O_SYNC);
+
+	// int foundLine = 0;
+	// int expFil = 0;
+	// int expDir = 1;
+
+	//recognize termination signal from user
+	signal(SIGINT, term_prog);
+
 	while(1){
 #ifdef DEBUG
 		printf("==> MANAGER SENDING TASK : %s\n", task);
