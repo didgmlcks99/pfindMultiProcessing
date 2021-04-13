@@ -1,12 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <string.h>
-#include <errno.h>
+#include <sys/stat.h>
+#include <sys/file.h>
 
 int write_bytes(int fd, void * a, int len){
 	char * s = (char *) a;
@@ -142,8 +144,9 @@ int main(int arc, char** args){
 			int tasks_rec = open("tasks", O_RDONLY | O_SYNC);
 			int results_send = open("results", O_WRONLY | O_SYNC);
 			
-			//wait for task in tasks_rec pipe
+			
 			while(1){
+				//look into named pipe 'tasks' for a task, (directory name)
 				char task_name[128];
 				size_t len, bs;
 
@@ -174,7 +177,7 @@ int main(int arc, char** args){
 				printf("==> WORKER[%d] > DIRECTORY '%s' IS SUCCESSFULLY OPENED\n", i, task_name);
 #endif
 
-//open pipe for sending data from linux command, file
+						//open unnamed pipe for sending data from linux command, file
 						int pipes[2];
 						if(pipe(pipes) != 0){
 							perror("Error : cannot open pipe\n");
@@ -192,8 +195,6 @@ int main(int arc, char** args){
 					char path_name[50];
 					if(strcmp(each_file->d_name, "..") == 0 || strcmp(each_file->d_name, ".") == 0){}
 					else{
-						// printf("%s\n", each_file->d_name);
-
 						sprintf(path_name, "%s/%s", task_name, each_file->d_name);
 
 						//executes Linux command : file <file>, sending result to pipe
@@ -205,14 +206,15 @@ int main(int arc, char** args){
 							exit(1);
 						}wait(0x0);
 
-						//check file type, from pipe
+						//differentiates the type of opened files in given task (directory)
 						pid_t maker = fork();
 						if(maker == 0){
 							close(pipes[1]);
 							dup2(pipes[0], 0);
 
 							char typeFL[50];
-
+							
+							//gets file name from the pipe done the execution of Linux command : find
 							scanf("%[^\n]s", typeFL);
 
 #ifdef DEBUG
@@ -220,17 +222,20 @@ int main(int arc, char** args){
 #endif
 
 							if(strstr(typeFL, "ASCII") != NULL || strstr(typeFL, "text") != NULL){
+								/*worker found a ACSII or text version file, 
+								open file explore through each line, find for matching keyword,
+								then send result regarding to 1. explored file 2. found line*/
 #ifdef DEBUG
 								printf("WORKER[%d] > FILE TYPE : ASCII or text\n", i);
 #endif
-								//open detected text file to read
+								//open detected file to be examined
 								FILE *text_file = fopen(path_name, "r");
 								if(!text_file){
 									printf("Error : cannot open this file '%s'\n", path_name);
 									continue;
 								}
 
-								//check text file by each line
+								//examine each line and crop it by each word
 								char line[256];
 								int line_num = 0;
 								while(fgets(line, 256, text_file)){
@@ -248,7 +253,7 @@ int main(int arc, char** args){
 										}
 									}
 									
-									// check correct words
+									//compare each word from file with the keywords chosen by user,
 									int correct;
 									for(int i = numKey; i < numKey + countKey; i++){
 										correct = 0;
@@ -263,19 +268,23 @@ int main(int arc, char** args){
 										}
 									}
 
-									//print out result
+									////if and only if, all the keywords are found than the line will be printed
 									if(correct == 1){
 										printf("%s : %d : %s", path_name, line_num, line);
 									}
 									line_num++;
 								}
-							}else if(strstr(typeFL, "directory") != NULL){ /*worker found a directory send to manager as a new taks*/
+							}else if(strstr(typeFL, "directory") != NULL){
+								/*worker found a directory,
+								send to manager as a new taskv through named pipe, results, 
+								then send result regarding to 3. explored directory*/
 #ifdef DEBUG
 								printf("==> WORKER[%d] > FILE TYPE : directory\n", i);
-								printf("==> WORKER[%d] > SENT TASK : %s...\n", i, path_name);
+								printf("==> WORKER[%d] > SENT TASK : %s\n", i, path_name);
 #endif
 								size_t len = strlen(path_name);
 								flock(results_send, LOCK_EX);
+								//send the full path name for the found directory to the named pipe, results
 								if(write_bytes(results_send, &len, sizeof(len)) != sizeof(len)){}
 								if(write_bytes(results_send, path_name, len) != len){
 									flock(results_send, LOCK_UN);
@@ -297,11 +306,13 @@ int main(int arc, char** args){
 	}
 
 	char task[128];
+	//first task will be initiated with the directory user have chosen
 	strcpy(task, args[numDir]);
 
 	char result_name[128];
 	strcpy(result_name, args[numDir]);
 
+	//final result datas of explored information
 	int foundLine = 0;
 	int expFil = 0;
 	int expDir = 1;
@@ -312,15 +323,14 @@ int main(int arc, char** args){
 #ifdef DEBUG
 		printf("==> MANAGER SENDING TASK : %s\n", task);
 #endif
-		//manager send task through tasks_send pipe
-		size_t len = strlen(task);
 
+		size_t len = strlen(task);
+		//manager send task through named pipe tasks
 		if(write_bytes(tasks_send, &len, sizeof(len)) != sizeof(len)){}
 		if(write_bytes(tasks_send, task, len) != len){}
 			
-		//wait for worker in results_rec pipe
 		size_t length, bs;
-
+		//get the sent results from a worker through named pipe, results
 		if(read_bytes(results_rec, &length, sizeof(length)) != sizeof(length)){}
 
 		bs = read_bytes(results_rec, result_name, length);
@@ -329,6 +339,7 @@ int main(int arc, char** args){
 #ifdef DEBUG
 		printf("==> MANAGER RECEIVED TASK : %s\n", result_name);
 #endif
+		//copy the result to task for manager to send to workers
 		strcpy(task, result_name);
 	}
 	close(tasks_send);
