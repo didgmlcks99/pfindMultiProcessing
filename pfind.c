@@ -24,6 +24,7 @@ int foundLine = 0;
 int expFil = 0;
 int expDir = 1;
 
+//return the size of the information that will be sent to named pipe
 int write_bytes(int fd, void * a, int len){
 	char * s = (char *) a;
 
@@ -37,6 +38,7 @@ int write_bytes(int fd, void * a, int len){
 	return i;
 }
 
+//return the size of the information that should be read in the named pipe
 int read_bytes (int fd, void * a, int len){
 	char * s = (char *) a ;
 	
@@ -51,6 +53,7 @@ int read_bytes (int fd, void * a, int len){
 	return i ; 
 }
 
+//happens when signal ^c is sent by the user
 void term_prog(){
 	//getting time result
 	clock_gettime(CLOCK_MONOTONIC, &end);
@@ -104,11 +107,11 @@ int main(int argc, char** args){
 			if(args[i][1] == 'p'){
 				numProc = args[i+1][0] - '0';
 
-				if(numProc <= 8 && numProc >= 1){
+				if(numProc < 8 && numProc > 1){
 					numOpt++;
 				}else{
 					printf("Error : not by rule\n");
-					printf("!In this limit : 1 <= N <= 8\n");
+					printf("!In this limit : 1 < N < 8\n");
 					printf("Terminating Program\n");
 					exit(1);
 				}
