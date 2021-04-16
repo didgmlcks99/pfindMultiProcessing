@@ -363,6 +363,7 @@ int main(int argc, char** args){
 #ifdef DEBUG
 							printf("FILE TYPE : not regular\n");
 #endif
+							//non regular file
 							flag = 0;
 						}
 
